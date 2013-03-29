@@ -4,7 +4,7 @@ using WindowsServiceTasks.Demo.Services;
 
 namespace WindowsServiceTasks.Demo.ServiceTasks
 {
-    public class EmailServiceTask : WindowsServiceTaskBase
+    public class EmailServiceTask : WindowsServiceLoopBase
     {
         private readonly ILogger _logger;
 
@@ -15,7 +15,7 @@ namespace WindowsServiceTasks.Demo.ServiceTasks
 
         protected override int LoopMilliseconds
         {
-            get { return 10000; }
+            get { return 2000; }
         }
 
         protected override void HandleException(Exception exception)
@@ -26,6 +26,7 @@ namespace WindowsServiceTasks.Demo.ServiceTasks
         protected override void RunLoop()
         {
             // TODO Send Email!
+            _logger.Log("EmailServiceTask.RunLoop - Sending an email");
         }
 
         public override void OnStart(string[] args)

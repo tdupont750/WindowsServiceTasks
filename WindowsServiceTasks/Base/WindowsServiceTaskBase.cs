@@ -11,31 +11,10 @@ namespace WindowsServiceTasks.Base
         {
             Dispose(true);
         }
-
-        protected abstract int LoopMilliseconds { get; }
-
-        protected abstract void HandleException(Exception exception);
-
-        protected abstract void RunLoop();
-
+        
         public abstract void OnStart(string[] args);
 
-        public void Run(CancellationToken cancellationToken)
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    RunLoop();
-                }
-                catch (Exception ex)
-                {
-                    HandleException(ex);
-                }
-
-                cancellationToken.WaitHandle.WaitOne(LoopMilliseconds);
-            }
-        }
+        public abstract void Run(CancellationToken cancellationToken);
 
         public abstract void OnStop();
 
@@ -58,5 +37,10 @@ namespace WindowsServiceTasks.Base
         }
 
         protected abstract void DisposeResources();
+
+        public virtual bool WaitOnStop
+        {
+            get { return true; }
+        }
     }
 }

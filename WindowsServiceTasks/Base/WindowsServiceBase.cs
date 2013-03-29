@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.ServiceProcess;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,17 +9,22 @@ namespace WindowsServiceTasks.Base
 {
     public abstract class WindowsServiceBase : ServiceBase
     {
-        private readonly Task[] _runTasks;
         private readonly CancellationTokenSource _cancellationTokenSource;
-        private readonly IWindowsServiceTask[] _windowsServiceTasks;
+        private readonly IList<Tuple<IWindowsServiceTask, Task>> _taskPairs;
 
         private bool _hasOnStopFired;
 
         protected WindowsServiceBase(params IWindowsServiceTask[] windowsServiceTasks)
         {
             _cancellationTokenSource = new CancellationTokenSource();
-            _windowsServiceTasks = windowsServiceTasks;
-            _runTasks = new Task[windowsServiceTasks.Length];
+            _taskPairs = new List<Tuple<IWindowsServiceTask, Task>>(windowsServiceTasks.Length);
+
+            foreach (var windowsServiceTask in windowsServiceTasks)
+            {
+                var task = new Task(RunServiceTask, windowsServiceTask, _cancellationTokenSource.Token);
+                var tuple = new Tuple<IWindowsServiceTask, Task>(windowsServiceTask, task);
+                _taskPairs.Add(tuple);
+            }
         }
 
         public void Start(string[] args)
@@ -36,21 +43,25 @@ namespace WindowsServiceTasks.Base
             Console.WriteLine("Press enter to stop.");
             Console.ReadLine();
 
+            if (_hasOnStopFired) 
+                return;
+
             Console.WriteLine("Stopping...");
             OnStop();
             Console.WriteLine("...Stopping");
+
+            Console.WriteLine();
+            Console.WriteLine("Press enter to exit.");
+            Console.ReadLine();
         }
 
         protected override void OnStart(string[] args)
         {
-            foreach (var serviceTask in _windowsServiceTasks)
-                serviceTask.OnStart(args);
+            foreach (var taskPair in _taskPairs)
+                taskPair.Item1.OnStart(args);
 
-            for (var i = 0; i < _windowsServiceTasks.Length; i++)
-            {
-                var serviceTask = _windowsServiceTasks[i];
-                _runTasks[i] = Task.Factory.StartNew(RunServiceTask, serviceTask, _cancellationTokenSource.Token);
-            }
+            foreach (var taskPair in _taskPairs)
+                taskPair.Item2.Start();
         }
 
         private void RunServiceTask(object state)
@@ -83,16 +94,21 @@ namespace WindowsServiceTasks.Base
 
             _cancellationTokenSource.Cancel();
 
-            Task.WaitAll(_runTasks);
+            var tasks = _taskPairs
+                .Where(p => p.Item1.WaitOnStop)
+                .Select(p => p.Item2)
+                .ToArray();
 
-            foreach (var runTask in _runTasks)
-                runTask.Dispose();
+            Task.WaitAll(tasks);
 
-            foreach (var serviceTask in _windowsServiceTasks)
-                serviceTask.OnStop();
+            foreach (var task in tasks)
+                task.Dispose();
 
-            foreach (var serviceTask in _windowsServiceTasks)
-                serviceTask.Dispose();
+            foreach (var taskPair in _taskPairs)
+                taskPair.Item1.OnStop();
+
+            foreach (var taskPair in _taskPairs)
+                taskPair.Item1.Dispose();
         }
 
         protected abstract void LogException(Exception exception);
