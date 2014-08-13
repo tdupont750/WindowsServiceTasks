@@ -1,5 +1,6 @@
 ﻿using WindowsServiceTasks.Demo.ServiceTasks;
-using WindowsServiceTasks.Demo.Services.Implementation;
+using Common.Logging;
+using Common.Logging.Simple;
 
 namespace WindowsServiceTasks.Demo
 {
@@ -7,11 +8,11 @@ namespace WindowsServiceTasks.Demo
     {
         public static void Main(params string[] args)
         {
-            var logger = new Logger("Demo.log");
+            var logger = new ConsoleOutLogger("Default", LogLevel.All, true, true, false, string.Empty);
             var emailTask = new EmailServiceTask(logger);
             var failTask = new FailServiceTask(logger);
 
-            var service = new Service1(logger, emailTask, failTask);
+            var service = new ConsoleWindowsService(logger, emailTask, failTask);
             service.Start(args);
         }
     }

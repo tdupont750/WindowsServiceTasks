@@ -1,46 +1,51 @@
-﻿using System;
-using WindowsServiceTasks.Base;
-using WindowsServiceTasks.Demo.Services;
+﻿using System.Threading;
+using System.Threading.Tasks;
+using Common.Logging;
 
 namespace WindowsServiceTasks.Demo.ServiceTasks
 {
-    public class EmailServiceTask : WindowsServiceLoopBase
+    public class EmailServiceTask : IWindowsServiceTask
     {
-        private readonly ILogger _logger;
+        private readonly ILog _logger;
 
-        public EmailServiceTask(ILogger logger)
+        public EmailServiceTask(ILog logger)
         {
             _logger = logger;
         }
 
-        protected override int LoopMilliseconds
+        public string Name
         {
-            get { return 2000; }
+            get { return GetType().Name; }
         }
 
-        protected override void HandleException(Exception exception)
+        public bool IsWaitOnStop
         {
-            _logger.Log(exception);
+            get { return true; }
         }
 
-        protected override void RunLoop()
+        public bool IsShutdownOnStop
         {
-            // TODO Send Email!
-            _logger.Log("EmailServiceTask.RunLoop - Sending an email");
+            get { return true; }
         }
 
-        public override void OnStart(string[] args)
+        public void OnStart(params string[] args)
         {
-            _logger.Log("EmailServiceTask.OnStart");
+            _logger.Info("EmailServiceTask.OnStart");
         }
 
-        public override void OnStop()
+        public async Task RunAsync(CancellationToken cancellationToken)
         {
-            _logger.Log("EmailServiceTask.OnStop");
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(1000, cancellationToken);
+
+                _logger.Info("EmailServiceTask.RunAsync - Send Email");
+            }
         }
 
-        protected override void DisposeResources()
+        public void OnStop()
         {
+            _logger.Info("EmailServiceTask.OnStop");
         }
     }
 }

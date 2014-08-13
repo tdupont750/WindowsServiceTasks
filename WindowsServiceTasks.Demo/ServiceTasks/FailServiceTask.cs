@@ -1,39 +1,50 @@
 ﻿using System;
 using System.Threading;
-using WindowsServiceTasks.Base;
-using WindowsServiceTasks.Demo.Services;
+using System.Threading.Tasks;
+using Common.Logging;
 
 namespace WindowsServiceTasks.Demo.ServiceTasks
 {
-    public class FailServiceTask : WindowsServiceTaskBase
+    public class FailServiceTask : IWindowsServiceTask
     {
-        private readonly ILogger _logger;
+        private readonly ILog _logger;
         
-        public FailServiceTask(ILogger logger)
+        public FailServiceTask(ILog logger)
         {
             _logger = logger;
         }
 
-        public override void Run(CancellationToken cancellationToken)
+        public string Name
         {
-            cancellationToken.WaitHandle.WaitOne(4500);
+            get { return GetType().Name; }
+        }
 
+        public bool IsWaitOnStop
+        {
+            get { return true; }
+        }
+
+        public bool IsShutdownOnStop
+        {
+            get { return true; }
+        }
+
+        public void OnStart(params string[] args)
+        {
+            _logger.Info("FailServiceTask.OnStart");
+        }
+
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(2500, cancellationToken);
+            
             if (!cancellationToken.IsCancellationRequested)
                 throw new Exception("FailServiceTask is failing!");
         }
 
-        public override void OnStart(string[] args)
+        public void OnStop()
         {
-            _logger.Log("FailServiceTask.OnStart");
-        }
-
-        public override void OnStop()
-        {
-            _logger.Log("FailServiceTask.OnStop");
-        }
-
-        protected override void DisposeResources()
-        {
+            _logger.Info("FailServiceTask.OnStop");
         }
     }
 }

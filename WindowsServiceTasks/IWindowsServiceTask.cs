@@ -1,15 +1,20 @@
 ﻿using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace WindowsServiceTasks
 {
-    public interface IWindowsServiceTask : IDisposable
+    public interface IWindowsServiceTask
     {
-        bool WaitOnStop { get; }
+        string Name { get; }
 
-        void OnStart(string[] args);
+        bool IsWaitOnStop { get; }
+        
+        bool IsShutdownOnStop { get; }
 
-        void Run(CancellationToken cancellationToken);
+        void OnStart(params string[] args);
+
+        Task RunAsync(CancellationToken cancellationToken);
 
         void OnStop();
     }
