@@ -14,37 +14,30 @@ namespace WindowsServiceTasks.Demo.ServiceTasks
             _logger = logger;
         }
 
-        public string Name
-        {
-            get { return GetType().Name; }
-        }
+        public string Name => GetType().Name;
 
-        public bool IsWaitOnStop
-        {
-            get { return true; }
-        }
+        public bool IsWaitOnStop => true;
 
-        public bool IsShutdownOnStop
-        {
-            get { return true; }
-        }
+        public bool IsShutdownOnStop => true;
 
-        public void OnStart(params string[] args)
+        public Task OnStartAsync(string[] args, CancellationToken cancelToken)
         {
             _logger.Info("FailServiceTask.OnStart");
+            return Task.FromResult(true);
         }
 
-        public async Task RunAsync(CancellationToken cancellationToken)
+        public async Task RunAsync(CancellationToken cancelToken)
         {
-            await Task.Delay(2500, cancellationToken);
+            await Task.Delay(2500, cancelToken).ConfigureAwait(false);
             
-            if (!cancellationToken.IsCancellationRequested)
+            if (!cancelToken.IsCancellationRequested)
                 throw new Exception("FailServiceTask is failing!");
         }
 
-        public void OnStop()
+        public Task OnStopAsync(CancellationToken cancelToken)
         {
             _logger.Info("FailServiceTask.OnStop");
+            return Task.FromResult(true);
         }
     }
 }

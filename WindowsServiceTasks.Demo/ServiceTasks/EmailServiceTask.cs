@@ -13,39 +13,31 @@ namespace WindowsServiceTasks.Demo.ServiceTasks
             _logger = logger;
         }
 
-        public string Name
-        {
-            get { return GetType().Name; }
-        }
+        public string Name => GetType().Name;
 
-        public bool IsWaitOnStop
-        {
-            get { return true; }
-        }
+        public bool IsWaitOnStop => true;
 
-        public bool IsShutdownOnStop
-        {
-            get { return true; }
-        }
+        public bool IsShutdownOnStop => true;
 
-        public void OnStart(params string[] args)
+        public Task OnStartAsync(string[] args, CancellationToken cancelToken)
         {
             _logger.Info("EmailServiceTask.OnStart");
+            return Task.FromResult(true);
         }
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(1000, cancellationToken);
-
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                 _logger.Info("EmailServiceTask.RunAsync - Send Email");
             }
         }
 
-        public void OnStop()
+        public Task OnStopAsync(CancellationToken cancellationToken)
         {
             _logger.Info("EmailServiceTask.OnStop");
+            return Task.FromResult(true);
         }
     }
 }

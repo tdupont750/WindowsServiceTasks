@@ -8,12 +8,12 @@ namespace WindowsServiceTasks.Demo
     {
         public static void Main(params string[] args)
         {
-            var logger = new ConsoleOutLogger("Default", LogLevel.All, true, true, false, string.Empty);
+            var logger = new ConsoleOutLogger("Default", LogLevel.All, true, true, true, string.Empty, true);
             var emailTask = new EmailServiceTask(logger);
             var failTask = new FailServiceTask(logger);
 
-            var service = new ConsoleWindowsService(logger, emailTask, failTask);
-            service.Start(args);
+            using (var service = new ConsoleWindowsService(logger, emailTask, failTask))
+                service.Start(args);
         }
     }
 }

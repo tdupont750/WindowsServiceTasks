@@ -5,27 +5,33 @@ using System.ServiceProcess;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Logging;
+using Common.Logging.Simple;
 
 namespace WindowsServiceTasks
 {
     public class ConsoleWindowsService : ServiceBase
     {
-        private readonly ILog _logger;
+        private static readonly TimeSpan StartStopTimeoutMin = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan StartStopTimeoutMax = TimeSpan.FromSeconds(25);
+
+        private readonly Lazy<ConsoleOutLogger> _lazyConsoleLogger;
         private readonly object _startStopLock;
-        private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly CancellationTokenSource _runCancelSource;
+
+        private readonly ILog _registeredlogger;
         private readonly IList<ServiceTaskPair> _taskPairs;
 
-        public ConsoleWindowsService(ILog logger, params IWindowsServiceTask[] windowsServiceTasks)
+        public ConsoleWindowsService(ILog registeredlogger, params IWindowsServiceTask[] windowsServiceTasks)
         {
             // Ensure that we have service tasks to run.
-            if (!windowsServiceTasks.Any())
-                throw new ArgumentException("WindowsServiceTasks Required", "windowsServiceTasks");
-            
-            _logger = logger;
-            _startStopLock = new object();
-            _cancellationTokenSource = new CancellationTokenSource();
+            if (windowsServiceTasks.Length == 0)
+                throw new ArgumentException("WindowsServiceTasks Required", nameof(windowsServiceTasks));
 
-            // Bind service tasks into pairs to assiciate them with tasks.
+            _startStopLock = new object();
+            _runCancelSource = new CancellationTokenSource();
+            _lazyConsoleLogger = new Lazy<ConsoleOutLogger>(() => new ConsoleOutLogger("ConsoleWindowsService", LogLevel.All, true, true, true, string.Empty, true));
+
+            _registeredlogger = registeredlogger;
             _taskPairs = windowsServiceTasks.Select(ServiceTaskPair.Create).ToList();
         }
 
@@ -34,70 +40,82 @@ namespace WindowsServiceTasks
             // If not user interactive then run the service normally.
             if (!Environment.UserInteractive)
             {
-                Run(new[] { (ServiceBase)this });
+                Run(new ServiceBase[] { this });
                 return;
             }
 
+            // Inform user about console mode.
+            _lazyConsoleLogger.Value.Info("Running on console mode, press enter to stop.");
+
             // Running in console mode, call OnStart.
-            Console.WriteLine("Starting...");
             OnStart(args);
-            Console.WriteLine("...Started");
 
             // Wait for user input to before shutting down.
-            Console.WriteLine();
-            Console.WriteLine("Press enter to stop.");
             Console.ReadLine();
 
-            if (_cancellationTokenSource.IsCancellationRequested)
-            {
+            if (_runCancelSource.IsCancellationRequested)
                 // Something already stopped the services.
-                Console.WriteLine("Already stopped.");
-            }
+                _lazyConsoleLogger.Value.Warn("Service was already stopped.");
             else
-            {
-                // Call OnStop before to initiate shutdown.
-                Console.WriteLine("Stopping...");
+            // Call OnStop before to initiate shutdown.
                 OnStop();
-                Console.WriteLine("...Stopping");
-            }
-            
+
             // Let user read output before shutting down.
-            Console.WriteLine();
-            Console.WriteLine("Press enter to exit.");
+            _lazyConsoleLogger.Value.Info("Press enter to exit.");
             Console.ReadLine();
         }
 
         protected override void OnStart(string[] args)
         {
-            lock (_startStopLock)
+
+            LockAndTry(() =>
             {
+                _lazyConsoleLogger.Value.Debug("Starting...");
+
                 // Call OnStart for each service, same way windows would.
-                foreach (var pair in _taskPairs)
-                    pair.ServiceTask.OnStart(args);
+                using (var startCancelSource = new CancellationTokenSource(StartStopTimeoutMin))
+                {
+                    var startTasks = new Task[_taskPairs.Count];
+
+                    for (var i = 0; i < _taskPairs.Count; i++)
+                        startTasks[i] = _taskPairs[i].ServiceTask.OnStartAsync(args, startCancelSource.Token);
+
+                    Task.WaitAll(startTasks, StartStopTimeoutMax);
+                }
 
                 // Call RunAsync for each service.
                 foreach (var pair in _taskPairs)
                     pair.Task = RunServiceAsync(pair.ServiceTask);
-            }
+
+                _lazyConsoleLogger.Value.Debug("...Started");
+            });
         }
 
         private async Task RunServiceAsync(IWindowsServiceTask serviceTask)
         {
+            Exception exception = null;
+
             try
             {
-                await serviceTask.RunAsync(_cancellationTokenSource.Token).ConfigureAwait(false);
+                await serviceTask.RunAsync(_runCancelSource.Token).ConfigureAwait(false);
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException ex)
             {
-                // Ignore task canceled exceptions, it should me that we are shutting down.
+                if (!_runCancelSource.IsCancellationRequested)
+                    exception = ex;
             }
             catch (Exception ex)
             {
-                if (Environment.UserInteractive)
-                    Console.WriteLine(ex.ToString());
+                exception = ex;
+            }
 
-                // There was an error, log it!
-                _logger.ErrorFormat("ConsoleWindowsService.RunServiceAsync - Unhandled Exception - Name: {0}", ex, serviceTask.Name);
+            if (exception != null)
+            {
+                if (Environment.UserInteractive)
+                    _lazyConsoleLogger.Value.Error(exception);
+
+                // ReSharper disable once InconsistentlySynchronizedField
+                _registeredlogger.ErrorFormat("ConsoleWindowsService.RunServiceAsync - Unhandled Exception - Name: {0}", exception, serviceTask.Name);
             }
 
             // If specified, shutdown all serviecs.
@@ -112,18 +130,27 @@ namespace WindowsServiceTasks
 
         protected void OnStop(IWindowsServiceTask serviceTask)
         {
-            lock (_startStopLock)
+            LockAndTry(() =>
             {
                 // Exit if another thread has already initiated shutdown.
-                if (_cancellationTokenSource.IsCancellationRequested)
-                    return;
+                if (_runCancelSource.IsCancellationRequested)
+                    return true;
+
+                _lazyConsoleLogger.Value.Debug("Stopping...");
 
                 // Signal shutdown.
-                _cancellationTokenSource.Cancel();
+                _runCancelSource.Cancel();
 
-                // Call OnStop.
-                foreach (var pair in _taskPairs)
-                    pair.ServiceTask.OnStop();
+                // Call OnStop for each service, same way windows would.
+                using (var stopCancelSource = new CancellationTokenSource(StartStopTimeoutMin))
+                {
+                    var stopTasks = new Task[_taskPairs.Count];
+
+                    for (var i = 0; i < _taskPairs.Count; i++)
+                        stopTasks[i] = _taskPairs[i].ServiceTask.OnStopAsync(stopCancelSource.Token);
+
+                    Task.WaitAll(stopTasks, StartStopTimeoutMax);
+                }
 
                 // Find...
                 // 1) All OTHER service tasks (to avoid deadlock) 
@@ -138,18 +165,48 @@ namespace WindowsServiceTasks
                     .ToArray();
 
                 // Wait on the other tasks.
-                Task.WaitAll(tasks, TimeSpan.FromSeconds(30));
+                Task.WaitAll(tasks, StartStopTimeoutMax);
 
-                // If normal OnStop call, just exit.
-                if (serviceTask == null)
+                _lazyConsoleLogger.Value.Debug("...Stopped");
+
+                // Success if normal OnStop call from ServiceProcess, otherwise
+                // this was unexpected and should cause a shutdown. 
+                return serviceTask == null;
+            });
+        }
+
+        private void LockAndTry(Action action)
+        {
+            LockAndTry(() =>
+            {
+                action();
+                return true;
+            });
+        }
+
+        private void LockAndTry(Func<bool> func)
+        {
+            lock (_startStopLock)
+            {
+                bool isSuccess;
+
+                try
+                {
+                    isSuccess = func();
+                }
+                catch (Exception ex)
+                {
+                    _lazyConsoleLogger.Value.Fatal(ex);
+                    _registeredlogger.Fatal(ex);
+
+                    isSuccess = false;
+                }
+
+                if (isSuccess)
                     return;
 
-                // This OnStop was fired by a failure, force shutdown.
                 if (Environment.UserInteractive)
-                {
-                    Console.WriteLine(); 
-                    Console.WriteLine("Service has stopped!");
-                }
+                    _lazyConsoleLogger.Value.Fatal("Service has stopped unexpectedly.");
                 else
                     Environment.Exit(1);
             }
@@ -167,7 +224,7 @@ namespace WindowsServiceTasks
                 ServiceTask = serviceTask;
             }
 
-            public IWindowsServiceTask ServiceTask { get; private set; }
+            public IWindowsServiceTask ServiceTask { get; }
 
             public Task Task { get; set; }
         }
